@@ -28,9 +28,11 @@ def index() -> str:
         return f'''
             <h1>Welcome to my Spotify App</h1>
             <p>You are logged in!</p>
+            <p><a href="/profile">View Profile</a></p>
             <p><a href="/playlists">View Playlists</a></p>
+            <p><a href="/saved-songs">View Saved Songs</a></p>
+            <p><a href="/refresh-token">Refresh token</a></p>
             <p><a href="/logout">Logout</a></p>
-            <p><a href="/refres-token"Refresh token</a></p>
             '''
     else:
         return '''
@@ -79,6 +81,9 @@ def callback():
     response = requests.post(SPOTIFY_TOKEN_URL, data=req_body)
     token_info = response.json()
 
+    if response.status_code != 200:
+        return f"Error getting access token: {token_info}"
+
     # Store token data in session
     session['access_token'] = token_info['access_token']
     session['refresh_token'] = token_info['refresh_token']
@@ -87,27 +92,53 @@ def callback():
     return redirect('/')
 
 
+@app.route('/profile')
+def get_profile():
+    response, error = make_spotify_request('me') # type: ignore
+
+    print("error checking...")
+    error_check(response, error)
+
+    print("we made it")
+    user_data = response.json() # type: ignore
+
+    return jsonify(user_data)
+
 
 
 @app.route('/playlists')
 def get_playlists():
     response, error = make_spotify_request('me/playlists') # type: ignore
 
-    # Check if there was an error
-    if error:
-        return f"Error: {error}"
-    
-    # Check if response is None (shouldn't happen if error is None, but good to be safe)
-    if response is None:
-        return "Error: No response received"
-    
-    # Check HTTP status
-    if response.status_code != 200:
-        return f"Error fetching playlists: {response.text}"
+    error_check(response, error)
 
-    playlists = response.json()
+    playlists = response.json() # type: ignore
 
     return jsonify(playlists)
+
+
+@app.route('/saved-songs')
+@app.route('/saved-songs/<offset>')
+def get_saved_songs(offset=0):
+    params = {
+        'limit': 50,
+        'offset': offset
+    }
+
+    response, error = make_spotify_request('me/tracks', data=params) # type: ignore
+
+    data = response.json() # type: ignore
+
+    result = {
+        'tracks': data['items'],
+        'total': data['total'],
+        'limit': data['limit'],
+        'offset': data['offset'],
+        'next_offset': offset + 50 if offset + 50 < data['total'] else None,
+        'prev_offset': offset - 50 if offset > 0 else None
+    }
+
+    return jsonify(result)
 
 
 
@@ -130,6 +161,7 @@ def refresh_token():
     if response.status_code != 200:
         return redirect('/logout')
 
+    # print(f"{session['access_token']} replaced by {new_token_info['access_token']} and expires in {new_token_info['expires_in']}")
     session['access_token'] = new_token_info['access_token']
     session['expires_at'] = datetime.now().timestamp() + new_token_info['expires_in']
     
@@ -164,7 +196,7 @@ def make_spotify_request(endpoint, method='GET', data=None):
     url = f"{SPOTIFY_API_BASE_URL}/{endpoint}"
 
     if method == 'GET':
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, params=data)
     elif method == 'POST':
         response = requests.post(url, headers=headers, json=data)
     else:
@@ -172,6 +204,19 @@ def make_spotify_request(endpoint, method='GET', data=None):
     
     return response, None
 
+
+def error_check(response, error):
+    # Check if there was an error
+    if error:
+        return f"Error: {error}"
+    
+    # Check if response is None (shouldn't happen if error is None, but good to be safe)
+    if response is None:
+        return "Error: No response received"
+    
+    # Check HTTP status
+    if response.status_code != 200:
+        return f"Error fetching playlists: {response.text}"
     
 
 if __name__ == '__main__':
